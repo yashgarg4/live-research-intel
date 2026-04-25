@@ -12,13 +12,33 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
+from pathlib import Path
 from typing import Any, TypedDict
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 logger = logging.getLogger(__name__)
+
+# Resolve the project root once. The MCP server subprocess needs:
+#   1. cwd = project root, so ``python -m backend.mcp_servers.X`` resolves
+#      the ``backend`` package even when uvicorn was started from somewhere
+#      else (the parent's CWD is not necessarily the project root).
+#   2. PYTHONPATH = project root, as belt-and-braces in case cwd is ignored
+#      by some launcher.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _subprocess_env() -> dict[str, str]:
+    env = dict(os.environ)
+    existing_pp = env.get("PYTHONPATH", "")
+    parts = [str(_PROJECT_ROOT)]
+    if existing_pp:
+        parts.append(existing_pp)
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+    return env
 
 
 class SearchOutcome(TypedDict):
@@ -43,7 +63,8 @@ async def _call_mcp_tool(
     params = StdioServerParameters(
         command=sys.executable,
         args=["-m", server_module],
-        env=None,  # inherit (TAVILY_API_KEY, etc.)
+        env=_subprocess_env(),
+        cwd=str(_PROJECT_ROOT),
     )
     try:
         async with stdio_client(params) as (read, write):

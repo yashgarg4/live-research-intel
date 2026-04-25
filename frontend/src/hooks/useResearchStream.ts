@@ -7,6 +7,7 @@ import {
   type AwaitingInput,
   type Citation,
   type StreamState,
+  type ToolCall,
 } from "../types";
 
 const RESEARCH_URL = "http://127.0.0.1:8000/research";
@@ -260,6 +261,50 @@ function applyEvent(
           searchPreview: v?.search_preview ?? "",
         };
         setState((prev) => ({ ...prev, awaitingInput: awaiting }));
+      } else if (event.name === "tool_call_start") {
+        const v = event.value as Partial<{
+          tool_call_id: string;
+          tool_name: string;
+          args: Record<string, unknown>;
+          parent_message_id: string;
+        }>;
+        if (!v?.tool_call_id || !v?.tool_name) return;
+        const call: ToolCall = {
+          id: v.tool_call_id,
+          toolName: v.tool_name,
+          args: v.args ?? {},
+          status: "running",
+          sourceCount: null,
+          error: null,
+          durationMs: null,
+          parentMessageId: v.parent_message_id ?? null,
+        };
+        setState((prev) => ({
+          ...prev,
+          toolCalls: [...prev.toolCalls, call],
+        }));
+      } else if (event.name === "tool_call_end") {
+        const v = event.value as Partial<{
+          tool_call_id: string;
+          source_count: number;
+          error: string | null;
+          duration_ms: number;
+        }>;
+        if (!v?.tool_call_id) return;
+        setState((prev) => ({
+          ...prev,
+          toolCalls: prev.toolCalls.map((c) =>
+            c.id === v.tool_call_id
+              ? {
+                  ...c,
+                  status: v.error ? "error" : "done",
+                  sourceCount: v.source_count ?? c.sourceCount,
+                  error: v.error ?? null,
+                  durationMs: v.duration_ms ?? c.durationMs,
+                }
+              : c,
+          ),
+        }));
       }
       return;
     }

@@ -1,11 +1,13 @@
 import { useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AgentKey, AgentState } from "../types";
+import type { AgentKey, AgentState, ToolCall } from "../types";
+import { ToolCallStrip } from "./ToolCallStrip";
 
 interface AgentPanelProps {
   agent: AgentKey;
   state: AgentState;
+  toolCalls?: ToolCall[];
 }
 
 interface Styling {
@@ -44,7 +46,7 @@ const STYLES: Record<AgentKey, Styling> = {
   },
 };
 
-export function AgentPanel({ agent, state }: AgentPanelProps) {
+export function AgentPanel({ agent, state, toolCalls }: AgentPanelProps) {
   const s = STYLES[agent];
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -53,6 +55,8 @@ export function AgentPanel({ agent, state }: AgentPanelProps) {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [state.text]);
+
+  const hasTools = (toolCalls?.length ?? 0) > 0;
 
   return (
     <div className="flex flex-col min-h-0 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg overflow-hidden">
@@ -70,6 +74,7 @@ export function AgentPanel({ agent, state }: AgentPanelProps) {
         ref={scrollRef}
         className="flex-1 min-h-[260px] max-h-[520px] overflow-y-auto p-4"
       >
+        {hasTools && <ToolCallStrip calls={toolCalls ?? []} />}
         {state.text ? (
           <div
             className="prose prose-invert prose-sm max-w-none

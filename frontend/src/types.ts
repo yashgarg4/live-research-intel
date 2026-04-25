@@ -52,6 +52,17 @@ export interface Citation {
   url: string;
 }
 
+export interface ToolCall {
+  id: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  status: "running" | "done" | "error";
+  sourceCount: number | null;
+  error: string | null;
+  durationMs: number | null;
+  parentMessageId: string | null;
+}
+
 export interface AgentState {
   status: "idle" | "streaming" | "done";
   text: string;
@@ -71,6 +82,7 @@ export interface StreamState {
   threadId: string | null;
   awaitingInput: AwaitingInput | null;
   refinement: string | null; // set when user submits a non-"skip" refinement
+  toolCalls: ToolCall[];
   errorMessage?: string;
 }
 
@@ -86,6 +98,7 @@ export const INITIAL_STREAM_STATE: StreamState = {
   threadId: null,
   awaitingInput: null,
   refinement: null,
+  toolCalls: [],
 };
 
 export const AGENT_KEYS: AgentKey[] = ["searcher", "critic", "synthesizer"];

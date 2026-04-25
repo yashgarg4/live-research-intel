@@ -6,10 +6,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import uuid
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from ag_ui.core import (
+    CustomEvent,
     EventType,
     TextMessageContentEvent,
     TextMessageEndEvent,
@@ -73,6 +75,73 @@ def _needs_memory_rewrite(question: str) -> bool:
     if len(q.split()) < 6:  # very short → probably context-dependent
         return True
     return False
+
+
+async def _instrumented_tool_call(
+    tool_name: str,
+    fn: Callable[..., Awaitable[dict[str, Any]]],
+    arguments: dict[str, Any],
+    *,
+    parent_message_id: str,
+) -> dict[str, Any]:
+    """Wrap an MCP tool invocation so the UI gets live ``tool_call_start``
+    and ``tool_call_end`` AG-UI custom events with timing + source counts.
+
+    Designed to be awaited inside ``asyncio.gather`` — start events fire
+    concurrently up-front, end events fire as each individual call returns,
+    so the strip in the browser visibly tracks real parallel execution.
+    """
+    writer = get_stream_writer()
+    tool_call_id = f"call-{uuid.uuid4()}"
+
+    writer(
+        CustomEvent(
+            type=EventType.CUSTOM,
+            name="tool_call_start",
+            value={
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "args": arguments,
+                "parent_message_id": parent_message_id,
+            },
+        )
+    )
+
+    started_at = time.monotonic()
+    try:
+        outcome = await fn(**arguments)
+    except Exception as exc:  # noqa: BLE001 — propagate AFTER emitting end
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        writer(
+            CustomEvent(
+                type=EventType.CUSTOM,
+                name="tool_call_end",
+                value={
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "source_count": 0,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "duration_ms": duration_ms,
+                },
+            )
+        )
+        raise
+
+    duration_ms = int((time.monotonic() - started_at) * 1000)
+    writer(
+        CustomEvent(
+            type=EventType.CUSTOM,
+            name="tool_call_end",
+            value={
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "source_count": len(outcome.get("sources") or []),
+                "error": outcome.get("error"),
+                "duration_ms": duration_ms,
+            },
+        )
+    )
+    return outcome
 
 
 def _build_fallback_note(
@@ -182,10 +251,21 @@ async def searcher_node(state: ResearchState) -> dict[str, Any]:
 
     # Fan out across two MCP servers in parallel — both subprocess spawns
     # happen concurrently via asyncio.gather, so total wall time is bounded
-    # by the slower of the two rather than the sum.
+    # by the slower of the two rather than the sum. Each call is wrapped to
+    # emit AG-UI tool_call_start/end events for live UI rendering.
     tavily_outcome, wiki_outcome = await asyncio.gather(
-        tavily_search(search_query, max_results=5),
-        wikipedia_search(search_query, max_results=3),
+        _instrumented_tool_call(
+            "tavily_search",
+            tavily_search,
+            {"query": search_query, "max_results": 5},
+            parent_message_id=message_id,
+        ),
+        _instrumented_tool_call(
+            "wikipedia_search",
+            wikipedia_search,
+            {"query": search_query, "max_results": 3},
+            parent_message_id=message_id,
+        ),
     )
 
     # Tag and merge with continuous [1]…[N] indexing for the Synthesizer.
