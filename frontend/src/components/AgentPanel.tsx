@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { AgentKey, AgentState } from "../types";
 
 interface AgentPanelProps {
@@ -66,19 +68,34 @@ export function AgentPanel({ agent, state }: AgentPanelProps) {
       </div>
       <div
         ref={scrollRef}
-        className="flex-1 min-h-[260px] max-h-[520px] overflow-y-auto p-4 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap font-mono"
+        className="flex-1 min-h-[260px] max-h-[520px] overflow-y-auto p-4"
       >
         {state.text ? (
-          state.text
+          <div
+            className="prose prose-invert prose-sm max-w-none
+                       prose-headings:text-slate-100 prose-headings:font-semibold
+                       prose-strong:text-slate-50
+                       prose-a:text-indigo-300 prose-a:no-underline hover:prose-a:underline
+                       prose-code:text-amber-300 prose-code:bg-slate-800/60
+                       prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                       prose-code:before:content-[''] prose-code:after:content-['']
+                       prose-li:marker:text-slate-500
+                       prose-p:my-2 prose-li:my-0.5
+                       prose-hr:border-slate-700"
+          >
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {state.text}
+            </ReactMarkdown>
+          </div>
         ) : state.status === "done" ? (
-          <span className="text-rose-400/80 italic">
+          <span className="text-rose-400/80 italic text-sm">
             No output — the model likely hit a rate limit or transient error.
             Try the question again.
           </span>
         ) : state.status === "streaming" ? (
-          <span className="text-slate-500 italic">Thinking…</span>
+          <span className="text-slate-500 italic text-sm">Thinking…</span>
         ) : (
-          <span className="text-slate-500 italic">
+          <span className="text-slate-500 italic text-sm">
             Waiting for upstream agent…
           </span>
         )}

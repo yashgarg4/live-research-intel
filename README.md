@@ -6,7 +6,7 @@ The full 2026 agentic stack, end-to-end:
 
 - **AG-UI** for typed agent ↔ UI event streaming (no polling, no spinners).
 - **LangGraph** for multi-agent orchestration with a shared `TypedDict` state.
-- **MCP-style tool calls** for web search.
+- **Real MCP server** (stdio transport, JSON-RPC) hosting Tavily web search — the Searcher consumes it via the `mcp` Python client.
 - **mem0** for cross-session memory so follow-ups build on prior research.
 - **Human-in-the-loop steering** — the graph pauses between agents and the UI gets the steering wheel.
 
@@ -30,7 +30,7 @@ The full 2026 agentic stack, end-to-end:
 | Bespoke REST schemas, no interop between agent frameworks.              | **AG-UI is an open protocol** with typed events (`TextMessageContent`, `CustomEvent`, `RunStarted`, `RunFinished`).       |
 | Hand-rolled `while not done: call_llm()` loops.                         | **LangGraph `StateGraph`** with explicit nodes, typed shared state, native streaming, and `interrupt()` for HITL.          |
 | Memory = stuff the chat log into the next prompt.                       | **mem0 vector memory** — per-user, semantic + recency merge, injected into the Synthesizer's system prompt.                |
-| Tools are ad-hoc Python functions glued in by hand.                     | **MCP-style tool pattern** — typed inputs, tagged outcomes (`sources`, `error`) so the UI can render correct fallback UX.  |
+| Tools are ad-hoc Python functions glued in by hand.                     | **Real MCP server** for Tavily — stdio JSON-RPC, `mcp.server.fastmcp` on the server, `mcp.client.stdio` on the agent.       |
 | CopilotKit-locked frontends needing a Node.js runtime middleware proxy. | **AG-UI-native frontend** — a 60-line `useResearchStream` hook with `fetch` + `ReadableStream`. Zero middleware.            |
 | `certifi` bundle breaks behind corporate SSL inspection.                | **`truststore.inject_into_ssl()`** uses the OS trust store. Corporate CA chains work without code changes.                 |
 
@@ -161,11 +161,13 @@ live_research_intel/
 │   ├── memory.py               mem0 save_research / get_context / get_most_recent
 │   ├── agents/
 │   │   ├── _common.py          chunk_text + stream_llm_with_retry
-│   │   ├── searcher.py         memory-aware query rewrite + Tavily + Gemini summary
+│   │   ├── searcher.py         memory-aware query rewrite + MCP search + Gemini summary
 │   │   ├── steer.py            HITL ask_for_refinement + await_refinement nodes
 │   │   ├── critic.py           gap analysis + one follow-up question
 │   │   └── synthesizer.py      final answer + CONFIDENCE + citations
-│   └── tools/search.py         Tavily wrapper (tagged outcome)
+│   ├── mcp_servers/
+│   │   └── tavily_server.py    FastMCP server — exposes tavily_search over stdio
+│   └── tools/search.py         MCP client — spawns + drives the Tavily MCP server
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx             SearchBar + 3 panels + RefineInput + ResultCard
