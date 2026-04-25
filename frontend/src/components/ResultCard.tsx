@@ -42,8 +42,7 @@ function confidenceBand(score: number) {
   };
 }
 
-// Rewrite `[1, 3]` inline markers into markdown links that jump to the
-// citation list item below. Only keeps indices that actually exist in the
+// Rewrite `[1, 3]` inline markers into markdown links that jump to citation list item below. Only keeps indices that actually exist in the
 // citations list so broken markers render as plain text.
 function linkifyCitations(text: string, citations: Citation[]): string {
   if (citations.length === 0) return text;
