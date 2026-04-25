@@ -1,9 +1,10 @@
 # Live Research Intelligence
 
 [![CI](https://github.com/yashgarg4/live-research-intel/actions/workflows/ci.yml/badge.svg)](https://github.com/yashgarg4/live-research-intel/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#license)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)
 ![Node 20+](https://img.shields.io/badge/Node-20%2B-339933?logo=node.js&logoColor=white)
+
+![Live Research Intelligence — live demo](docs/demo(1).gif)
 
 https://github.com/user-attachments/assets/60460ef7-d1cf-4c90-80ca-4c465daddd57
 
