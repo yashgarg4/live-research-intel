@@ -1,0 +1,44 @@
+# Internal-only docs (dev journal, not for public repo)
+INTERNAL_NOTES.md
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+/tmp/
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+.claude
+
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local backups
+*.bak
+*.orig
