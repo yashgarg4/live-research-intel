@@ -1,4 +1,6 @@
-"""Searcher agent — runs Tavily search then streams a Gemini summary."""
+"""Searcher agent — fan-outs Tavily + Wikipedia (both via real MCP servers)
+in parallel, merges results with continuous indexing, then streams a Gemini
+summary."""
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +21,7 @@ from langgraph.config import get_stream_writer
 from backend.agents._common import chunk_text, stream_llm_with_retry
 from backend.config import get_llm
 from backend.state import ResearchState
-from backend.tools.search import tavily_search
+from backend.tools.search import tavily_search, wikipedia_search
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +73,55 @@ def _needs_memory_rewrite(question: str) -> bool:
     if len(q.split()) < 6:  # very short → probably context-dependent
         return True
     return False
+
+
+def _build_fallback_note(
+    tavily_outcome: dict[str, Any],
+    wiki_outcome: dict[str, Any],
+) -> str:
+    """Banner copy reflecting which MCP sources succeeded / failed / were
+    empty. Returned text is streamed verbatim into the Searcher panel."""
+    tavily_sources = tavily_outcome.get("sources") or []
+    wiki_sources = wiki_outcome.get("sources") or []
+    tavily_err = tavily_outcome.get("error")
+    wiki_err = wiki_outcome.get("error")
+    total = len(tavily_sources) + len(wiki_sources)
+
+    if total == 0:
+        if tavily_err and wiki_err:
+            return (
+                f"⚠️ All sources unavailable. "
+                f"Web: {tavily_err}. Wikipedia: {wiki_err}. "
+                "Using model knowledge only.\n\n"
+            )
+        if tavily_err:
+            return (
+                f"⚠️ Web search unavailable ({tavily_err}) "
+                "and Wikipedia returned nothing. Using model knowledge only.\n\n"
+            )
+        if wiki_err:
+            return (
+                f"⚠️ Wikipedia unavailable ({wiki_err}) "
+                "and web search returned nothing. Using model knowledge only.\n\n"
+            )
+        return (
+            "ℹ️ No results found across web or Wikipedia. "
+            "Using model knowledge only.\n\n"
+        )
+
+    notes: list[str] = []
+    if tavily_err:
+        notes.append(f"Web search failed ({tavily_err})")
+    elif not tavily_sources:
+        notes.append("Web search returned no results")
+    if wiki_err:
+        notes.append(f"Wikipedia failed ({wiki_err})")
+    elif not wiki_sources:
+        notes.append("Wikipedia returned no results")
+
+    if notes:
+        return f"⚠️ Partial sources only — {'; '.join(notes)}.\n\n"
+    return ""
 
 
 async def _rewrite_with_memory(question: str, memory_context: str) -> str:
@@ -128,28 +179,32 @@ async def searcher_node(state: ResearchState) -> dict[str, Any]:
     # topics have been researched.
     recent_memory = state.get("recent_memory", "") or ""
     search_query = await _rewrite_with_memory(question, recent_memory)
-    outcome = await tavily_search(search_query)
-    sources = outcome["sources"]
-    search_error = outcome["error"]
-    logger.info(
-        "Searcher: tavily returned %d sources (error=%s)",
-        len(sources),
-        search_error,
+
+    # Fan out across two MCP servers in parallel — both subprocess spawns
+    # happen concurrently via asyncio.gather, so total wall time is bounded
+    # by the slower of the two rather than the sum.
+    tavily_outcome, wiki_outcome = await asyncio.gather(
+        tavily_search(search_query, max_results=5),
+        wikipedia_search(search_query, max_results=3),
     )
 
-    # User-visible fallback banner when web search is unavailable or empty —
-    # streamed as real content so the browser panel shows the disclaimer.
-    fallback_note = ""
-    if search_error:
-        fallback_note = (
-            f"⚠️ Web search unavailable ({search_error}). "
-            "Using model knowledge only.\n\n"
-        )
-    elif not sources:
-        fallback_note = (
-            "ℹ️ No web results found for this query. "
-            "Using model knowledge only.\n\n"
-        )
+    # Tag and merge with continuous [1]…[N] indexing for the Synthesizer.
+    sources: list[dict[str, Any]] = []
+    for s in tavily_outcome["sources"]:
+        sources.append({**s, "source_type": "web"})
+    for s in wiki_outcome["sources"]:
+        sources.append({**s, "source_type": "wikipedia"})
+
+    logger.info(
+        "Searcher: tavily=%d wiki=%d (tavily_err=%s, wiki_err=%s)",
+        len(tavily_outcome["sources"]),
+        len(wiki_outcome["sources"]),
+        tavily_outcome["error"],
+        wiki_outcome["error"],
+    )
+
+    # User-visible banner — surface partial-failure as well as total-failure.
+    fallback_note = _build_fallback_note(tavily_outcome, wiki_outcome)
 
     collected: list[str] = []
     if fallback_note:
@@ -164,12 +219,14 @@ async def searcher_node(state: ResearchState) -> dict[str, Any]:
 
     if sources:
         sources_block = "\n\n".join(
-            f"[{i + 1}] {s['title']}\nURL: {s['url']}\nContent: {s['content']}"
+            f"[{i + 1}] ({s.get('source_type','web')}) {s['title']}\n"
+            f"URL: {s['url']}\nContent: {s['content']}"
             for i, s in enumerate(sources)
         )
     else:
         sources_block = (
-            "No web results available. Use your own knowledge and say so."
+            "No web or Wikipedia results available. "
+            "Use your own knowledge and say so."
         )
 
     user_prompt = f"Query: {question}\n\nSearch results:\n{sources_block}"

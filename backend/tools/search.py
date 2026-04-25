@@ -1,17 +1,12 @@
-"""Tavily search, mediated by a real MCP server over stdio transport.
+"""Web search tools, each mediated by a real MCP server over stdio.
 
-The ``tavily_search`` function is the public API and keeps the same
-``SearchOutcome`` shape so the Searcher node doesn't change. Internally
-each call spawns the MCP server (``backend.mcp_servers.tavily_server``) as
-a short-lived subprocess, opens a stdio MCP session, calls the
-``tavily_search`` tool, and tears the connection down.
+Two thin async wrappers — ``tavily_search`` and ``wikipedia_search`` —
+sharing a common ``_call_mcp_tool`` helper. Both return a uniform
+``SearchOutcome { sources, error }`` shape so the Searcher can fan out via
+``asyncio.gather`` and merge results without per-source branching.
 
-Why per-call rather than persistent? The MCP Python SDK's ``stdio_client``
-uses an anyio task group internally that's affinity-bound to the task that
-opened it. Holding the session across multiple FastAPI request tasks
-triggers ``"Attempted to exit cancel scope in a different task than it was
-entered in"`` at teardown. Per-call avoids the issue entirely; the startup
-overhead (~200–400 ms) is dwarfed by the subsequent LLM streaming.
+Per-call subprocess spawn (see INTERNAL_NOTES bottleneck #13 for why we
+don't hold persistent MCP sessions across FastAPI request tasks).
 """
 from __future__ import annotations
 
@@ -31,32 +26,34 @@ class SearchOutcome(TypedDict):
     error: str | None
 
 
-_TOOL_NAME = "tavily_search"
+# ─── Internal helper ────────────────────────────────────────────────────────
 
 
-def _server_params() -> StdioServerParameters:
-    return StdioServerParameters(
+async def _call_mcp_tool(
+    *,
+    server_module: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> SearchOutcome:
+    """Spawn ``python -m <server_module>``, run a single tool call, and
+    return the parsed ``SearchOutcome``. Any failure (subprocess startup,
+    transport error, tool exception) is logged and returned as a populated
+    ``error`` string with empty ``sources`` — the Searcher's banner UX
+    handles the rest."""
+    params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "backend.mcp_servers.tavily_server"],
-        env=None,  # inherit (TAVILY_API_KEY etc.)
+        args=["-m", server_module],
+        env=None,  # inherit (TAVILY_API_KEY, etc.)
     )
-
-
-async def tavily_search(query: str, max_results: int = 5) -> SearchOutcome:
-    """Public API — same shape as the in-process version, now mediated by
-    a real MCP server. Every failure is logged and returned as a
-    SearchOutcome with ``error`` set, so the Searcher's fallback banner
-    fires without the graph crashing."""
     try:
-        async with stdio_client(_server_params()) as (read, write):
+        async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                result = await session.call_tool(
-                    _TOOL_NAME,
-                    {"query": query, "max_results": max_results},
-                )
+                result = await session.call_tool(tool_name, arguments)
     except Exception as exc:  # noqa: BLE001 — broad catch is intentional
-        logger.warning("MCP tavily_search call failed: %s", exc)
+        logger.warning(
+            "MCP call %s/%s failed: %s", server_module, tool_name, exc
+        )
         return {
             "sources": [],
             "error": f"{type(exc).__name__}: {exc}",
@@ -66,10 +63,8 @@ async def tavily_search(query: str, max_results: int = 5) -> SearchOutcome:
 
 
 def _parse_tool_result(result: Any) -> SearchOutcome:
-    """FastMCP returns a ``CallToolResult``. For dict-returning tools the
-    payload is in ``content`` as a list of ``TextContent`` items with JSON
-    in ``.text``. We honor ``structuredContent`` first when the SDK exposes
-    it, then fall back to parsing the text contents."""
+    """Honor ``structuredContent`` first, fall back to JSON-decoding
+    ``TextContent`` items."""
     structured = getattr(result, "structuredContent", None) or getattr(
         result, "structured_content", None
     )
@@ -88,7 +83,7 @@ def _parse_tool_result(result: Any) -> SearchOutcome:
         if isinstance(parsed, dict):
             return _coerce_outcome(parsed)
 
-    logger.warning("MCP tavily_search returned unparseable result: %r", result)
+    logger.warning("MCP tool returned unparseable result: %r", result)
     return {"sources": [], "error": "MCP returned no parseable payload"}
 
 
@@ -100,3 +95,24 @@ def _coerce_outcome(data: dict[str, Any]) -> SearchOutcome:
     if error is not None and not isinstance(error, str):
         error = str(error)
     return {"sources": sources, "error": error}
+
+
+# ─── Public API ─────────────────────────────────────────────────────────────
+
+
+async def tavily_search(query: str, max_results: int = 5) -> SearchOutcome:
+    """Tavily web search via MCP."""
+    return await _call_mcp_tool(
+        server_module="backend.mcp_servers.tavily_server",
+        tool_name="tavily_search",
+        arguments={"query": query, "max_results": max_results},
+    )
+
+
+async def wikipedia_search(query: str, max_results: int = 3) -> SearchOutcome:
+    """Wikipedia (MediaWiki API) search via MCP."""
+    return await _call_mcp_tool(
+        server_module="backend.mcp_servers.wikipedia_server",
+        tool_name="wikipedia_search",
+        arguments={"query": query, "max_results": max_results},
+    )
