@@ -198,7 +198,15 @@ live_research_intel/
 │   │   └── components/         SearchBar / GraphViz / AgentPanel / ToolCallStrip / RefineInput / ResultCard
 │   ├── vite.config.ts          Tailwind v4 plugin, port 5173
 │   └── package.json
-├── requirements.txt
+├── tests/                      pytest unit tests for pure helpers
+│   ├── test_searcher.py        _needs_memory_rewrite + _build_fallback_note
+│   ├── test_synthesizer.py     _parse_confidence regex + clamping
+│   ├── test_common.py          chunk_text type coercion
+│   └── test_search.py          _coerce_outcome + _parse_tool_result
+├── .github/workflows/ci.yml    GitHub Actions — backend + frontend jobs
+├── requirements.txt            production dependencies
+├── requirements-dev.txt        production + pytest
+├── pytest.ini                  test discovery + warning filters
 ├── Makefile                    install / backend / frontend / dev / clean
 ├── .env.example
 └── README.md                   you are here
@@ -209,6 +217,38 @@ live_research_intel/
 ## Corporate networks
 
 TLS calls to Google / Tavily / mem0 use the OS trust store via [`truststore`](https://pypi.org/project/truststore/), injected at startup in `backend/config.py`. This is what lets the project work behind SSL-inspection proxies that rewrite certificates — otherwise `certifi` rejects the corporate root CA and all three providers fail with `CERTIFICATE_VERIFY_FAILED`.
+
+---
+
+## Quality & CI
+
+GitHub Actions runs two parallel jobs on every push and PR ([.github/workflows/ci.yml](.github/workflows/ci.yml)):
+
+**Backend (Python 3.12):**
+1. `python -m compileall -q backend` — catches any syntax-level regression.
+2. Smoke imports — `from backend.main import app`, `from backend.graph import graph`, both MCP server modules. Each catches dependency / circular-import issues without needing API keys.
+3. **`pytest`** — 50 unit tests across the pure-function helpers most likely to silently regress: `_needs_memory_rewrite`, `_build_fallback_note`, `_parse_confidence`, `chunk_text`, `_coerce_outcome`, `_parse_tool_result`. No LLM, no network, no subprocess — runs in ~4 seconds.
+
+**Frontend (Node 20):**
+1. `npm ci` — reproducible install from `package-lock.json`.
+2. `npx tsc -b` — full TypeScript build, project-wide.
+3. `npm run build` — production Vite bundle.
+
+Concurrency control cancels in-flight runs on new pushes; `workflow_dispatch` lets you trigger CI manually from the Actions tab.
+
+### Run tests locally
+
+```bash
+# Backend
+pip install -r requirements-dev.txt
+pytest                               # all 50 tests, ~4 s
+pytest tests/test_searcher.py -v     # one file with verbose output
+
+# Frontend
+cd frontend
+npx tsc -b                           # type-check
+npm run build                        # production build
+```
 
 ---
 
