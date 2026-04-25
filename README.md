@@ -1,5 +1,12 @@
 # Live Research Intelligence
 
+[![CI](https://github.com/yashgarg4/live-research-intel/actions/workflows/ci.yml/badge.svg)](https://github.com/yashgarg4/live-research-intel/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#license)
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)
+![Node 20+](https://img.shields.io/badge/Node-20%2B-339933?logo=node.js&logoColor=white)
+
+<video src="docs/demo.mp4" controls autoplay loop muted playsinline width="100%"></video>
+
 A live multi-agent research system. Ask any question and three specialist LangGraph agents — **Searcher**, **Critic**, **Synthesizer** — run in a coordinated graph while every reasoning token streams to the browser in real time over the AG-UI protocol. You watch each agent think as it happens, optionally steer the run mid-flight, and end up with a cited answer plus a confidence score.
 
 The full 2026 agentic stack, end-to-end:

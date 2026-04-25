@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Don't queue redundant runs of the same branch / PR — cancel previous on new push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile-check all backend sources
+        run: python -m compileall -q backend
+
+      - name: Smoke-test — FastAPI app loads
+        run: |
+          python -c "from backend.main import app; \
+                     print(f'OK — {len(app.routes)} routes registered')"
+
+      - name: Smoke-test — LangGraph compiles
+        run: |
+          python -c "from backend.graph import graph; \
+                     print('OK — nodes:', list(graph.get_graph().nodes))"
+
+      - name: Smoke-test — MCP servers import
+        run: |
+          python -c "from backend.mcp_servers import tavily_server, wikipedia_server; \
+                     print('OK — both MCP server modules import cleanly')"
+
+  frontend:
+    name: Frontend (Vite + TypeScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc -b
+
+      - name: Production build
+        run: npm run build
