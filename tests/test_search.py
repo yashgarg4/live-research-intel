@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from backend.tools.search import _coerce_outcome, _parse_tool_result
 
 
-# ─── _coerce_outcome ──────────────────────────────────────────────────────
+# _coerce_outcome 
 
 
 class TestCoerceOutcome:
@@ -53,7 +53,7 @@ class TestCoerceOutcome:
         assert result["sources"] == []
 
 
-# ─── _parse_tool_result ───────────────────────────────────────────────────
+# _parse_tool_result 
 
 
 def _structured(payload: dict) -> SimpleNamespace:
