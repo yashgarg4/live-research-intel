@@ -13,7 +13,7 @@ from pathlib import Path
 # Required for corporate networks that do SSL inspection — without this,
 # Tavily / Google / mem0 calls fail with CERTIFICATE_VERIFY_FAILED.
 # Safe on non-corporate networks; falls back to system roots.
-try:  # pragma: no cover — best-effort
+try:
     import truststore
 
     truststore.inject_into_ssl()
